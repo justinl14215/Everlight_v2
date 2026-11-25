@@ -16,7 +16,7 @@ type ReturnRecapProps = {
   scene: StoryLine[];
   lastUpdate: string;
   nextAction: string;
-  readAloud: (lines: StoryLine[]) => void;
+  readAloud: (lines: StoryLine[], take?: 'baseline') => void;
 };
 
 export function ReturnRecap({
@@ -110,6 +110,7 @@ export function ReturnRecap({
       `We’re in ${place}.`, lastUpdate, sceneText, nextAction,
     ];
 
+  const recapLine = { speaker, text: recap.filter(Boolean).join(' ') };
   return (
     <section className="notice" aria-labelledby="return-recap-title">
       <h3 id="return-recap-title">Welcome back, {hero}</h3>
@@ -129,7 +130,9 @@ export function ReturnRecap({
         )}
       </select>
       <div className="row">
-        <button type="button" onClick={() => readAloud([{ speaker, text: recap.filter(Boolean).join(' ') }])}>Hear the recap</button>
+        <button type="button" onClick={() => readAloud([recapLine])}>Hear the recap</button>
+        {process.env.NODE_ENV === 'development' && speaker === 'pip' &&
+          <button type="button" onClick={() => readAloud([recapLine], 'baseline')}>Compare original Pip delivery</button>}
         <button type="button" className="primary" onClick={() => setOpen(false)}>Continue adventure</button>
       </div>
     </section>

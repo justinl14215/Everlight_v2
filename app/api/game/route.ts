@@ -1,3 +1,4 @@
+import { speechInstructions } from '@/lib/voice-direction';
 import { hasSharedStory, heroSpeakers, sharedStory, voices, type Speaker } from '@/lib/story-voices';
 
 import { NextRequest, NextResponse } from 'next/server';
@@ -63,11 +64,12 @@ async function sceneArt(req: NextRequest, session: Session, state: CampaignState
 export async function GET(req:NextRequest){try{const session=readSession(req);if(!session)return NextResponse.json({error:'Sign in or join with your invitation.'},{status:401});const s=await getState();if(req.nextUrl.searchParams.has('art'))return await sceneArt(req,session,s);return NextResponse.json(session.kind==='dm'?{state:s,days,flames,familyPlans}:{player:playerView(s,session.playerId!)});}catch(e){return NextResponse.json({error:e instanceof Error?e.message:'Unable to load game.'},{status:500})}}
 export async function POST(req:NextRequest){
  try{
- const body=await req.json() as {action:string;password?:string;code?:string;playerId?:PlayerId;missionId?:number;note?:string;clue?:string;roll?:number;modifier?:number;dc?:number;label?:string;amount?:number;character?:string;className?:string;preferences?:string[];ready?:boolean;hp?:number;maxHp?:number;defense?:number;day?:number;checkpoint?:number;enemy?:{name:string;hp:number;defense:number;attack:number;damage:string};ending?:string;reward?:string;spell?:string;item?:string;mode?:'ai'|'human';text?:string;speaker?:Speaker;planId?:string;choice?:{label?:string;action?:string;dialogue?:string}}; if(body.action==='login'){const expected=process.env.DM_PASSWORD;if(!expected)return NextResponse.json({error:'Configure DM_PASSWORD in .env.local before signing in.'},{status:503});const a=Buffer.from(body.password??''),b=Buffer.from(expected);if(a.length!==b.length||!timingSafeEqual(a,b))return NextResponse.json({error:'Incorrect DM password.'},{status:401});const res=NextResponse.json({ok:true});setCookie(res,{kind:'dm',exp:Date.now()+7*86400000});return res;}
+ const body=await req.json() as {action:string;password?:string;code?:string;playerId?:PlayerId;missionId?:number;note?:string;clue?:string;roll?:number;modifier?:number;dc?:number;label?:string;amount?:number;character?:string;className?:string;preferences?:string[];ready?:boolean;hp?:number;maxHp?:number;defense?:number;day?:number;checkpoint?:number;enemy?:{name:string;hp:number;defense:number;attack:number;damage:string};ending?:string;reward?:string;spell?:string;item?:string;mode?:'ai'|'human';text?:string;speaker?:Speaker;audioFormat?:'mp3'|'pcm';take?:'directed'|'baseline';planId?:string;choice?:{label?:string;action?:string;dialogue?:string}}; if(body.action==='login'){const expected=process.env.DM_PASSWORD;if(!expected)return NextResponse.json({error:'Configure DM_PASSWORD in .env.local before signing in.'},{status:503});const a=Buffer.from(body.password??''),b=Buffer.from(expected);if(a.length!==b.length||!timingSafeEqual(a,b))return NextResponse.json({error:'Incorrect DM password.'},{status:401});const res=NextResponse.json({ok:true});setCookie(res,{kind:'dm',exp:Date.now()+7*86400000});return res;}
  if(body.action==='join'){const code=body.code??'';const s=await getState();const id=(Object.keys(s.invites) as PlayerId[]).find(k=>s.invites[k]&&createHash('sha256').update(s.invites[k]).digest('hex')===createHash('sha256').update(code).digest('hex'));if(!id)return NextResponse.json({error:'This invitation is invalid or has already been used.'},{status:404});s.invites[id]='';s.players[id].joined=true;addLog(s,`${s.players[id].name} joined the adventure.`);await saveState(s);const res=NextResponse.json({ok:true,player:id});setCookie(res,{kind:'player',playerId:id,exp:Date.now()+7*86400000});return res;}
  const session=readSession(req);if(!session)return NextResponse.json({error:'Session expired. Sign in again.'},{status:401});if (body.action === 'narrationAudio') {
    const text = typeof body.text === 'string' ? body.text.trim() : '';
    const speaker = body.speaker ?? 'narrator';
+   const format = body.audioFormat === 'pcm' ? 'pcm' : 'mp3';
    if (!text || text.length > 3000 || !Object.hasOwn(voices, speaker)) {
      return NextResponse.json({ error: 'Choose a story speaker and enter 1 to 3,000 characters.' }, { status: 400 });
    }
@@ -82,8 +84,10 @@ export async function POST(req:NextRequest){
        model: 'gpt-4o-mini-tts',
        voice: voices[speaker],
        input: text,
-       instructions: 'Read the supplied line exactly, with clear diction and a measured, family-friendly fantasy storytelling delivery.',
-       response_format: 'mp3',
+       instructions: localEnabled() && speaker === 'pip' && body.take === 'baseline'
+         ? 'Read the supplied line exactly, with clear diction and a measured, family-friendly fantasy storytelling delivery.'
+         : speechInstructions(speaker),
+       response_format: format,
      }),
      signal: req.signal,
    });
@@ -91,7 +95,7 @@ export async function POST(req:NextRequest){
      return NextResponse.json({ error: `Narration audio is unavailable (OpenAI ${response.status}).` }, { status: 502 });
    }
    return new Response(response.body, {
-     headers: { 'Content-Type': 'audio/mpeg', 'Cache-Control': 'private, no-store' },
+     headers: { 'Content-Type': format === 'pcm' ? 'application/octet-stream' : 'audio/mpeg', 'Cache-Control': 'private, no-store' },
    });
  }
  const s=await getState();const dm=session.kind==='dm';const actor=session.playerId;
