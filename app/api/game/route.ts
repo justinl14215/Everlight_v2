@@ -1,3 +1,4 @@
+import { sceneArtPlan } from '@/lib/scene-art-plan';
 import { speechInstructions } from '@/lib/voice-direction';
 import { hasSharedStory, heroSpeakers, sharedStory, voices, type Speaker } from '@/lib/story-voices';
 
@@ -31,7 +32,7 @@ function recordRecapUpdate(state: CampaignState, text: string) {
   const history = state.recapHistory ?? [];
   state.recapHistory = [...history, { id: (history.at(-1)?.id ?? 0) + 1, text: text.slice(0, 450) }].slice(-20);
 }
-function playerView(s:CampaignState,id:PlayerId){const p=s.players[id];return {player:{...p,clues:s.deliveredClues[id]??[]},day:s.day,flames:s.flames.map(n=>flames.find(f=>f.name===n)).filter(Boolean),mapUnlocked:s.mapUnlocked,missions:s.missions.filter(m=>m.day<=s.day),familyPlans,completedPlanIds:s.completedPlanIds,dmMode:s.dmMode,checkpoint:s.checkpoint,storyProgress:s.storyProgress,lastCheck:s.lastCheck,narration:s.narration,recapHistory:s.recapHistory??[],storyChoices:s.storyChoices?.[String(s.day)+'-'+String(s.checkpoint)]??{},party:Object.values(s.players).map(({id,name,character,className,joined})=>({id,name,character,className,joined}))}}
+function playerView(s:CampaignState,id:PlayerId){const p=s.players[id];return {player:{...p,clues:s.deliveredClues[id]??[]},day:s.day,flames:s.flames.map(n=>flames.find(f=>f.name===n)).filter(Boolean),mapUnlocked:s.mapUnlocked,missions:s.missions.filter(m=>m.day<=s.day),familyPlans,completedPlanIds:s.completedPlanIds,dmMode:s.dmMode,checkpoint:s.checkpoint,storyProgress:s.storyProgress,lastCheck:s.lastCheck,narration:s.narration,recapHistory:s.recapHistory??[],artKey:sceneArtPlan(s,id).key,storyChoices:s.storyChoices?.[String(s.day)+'-'+String(s.checkpoint)]??{},party:Object.values(s.players).map(({id,name,character,className,joined})=>({id,name,character,className,joined}))}}
 function addLog(s:CampaignState,msg:string){s.log.push(`${new Date().toLocaleTimeString([], {hour:'numeric',minute:'2-digit'})} — ${msg}`);s.log=s.log.slice(-80)}
 async function sceneArt(req: NextRequest, session: Session, state: CampaignState) {
   const playerId = session.playerId;
@@ -43,26 +44,39 @@ async function sceneArt(req: NextRequest, session: Session, state: CampaignState
     return new Response(null, { status: 404 });
   }
 
-  const headers = { 'Content-Type': 'image/webp', 'Cache-Control': 'private, no-store' };
-  const key = `day-${day}-checkpoint-${checkpoint}-${playerId}.webp`;
-  if (localEnabled() || (day <= 2 && checkpoint === 4)) {
-    const file = day <= 2 && checkpoint === 4
-      ? path.join(process.cwd(), 'assets', 'scene-art', playerId + '.webp')
-      : path.join(process.cwd(), '.everlight-art', key);
-    try {
-      const image = await readFile(file);
-      return new Response(new Uint8Array(image), { headers });
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code === 'ENOENT') return new Response(null, { status: 404 });
-      throw error;
+  const { key, fallbackKey, bundled, previous } = sceneArtPlan(state, playerId);
+  const local = localEnabled();
+  const db = local || (bundled && !previous) ? null : createClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.SUPABASE_SERVICE_ROLE_KEY!, {
+      auth: { persistSession: false },
+    },
+  );
+
+  async function load(fileKey: string, useBundled = false) {
+    if (useBundled || local) {
+      const file = useBundled
+        ? path.join(process.cwd(), 'assets', 'scene-art', playerId + '.webp')
+        : path.join(process.cwd(), '.everlight-art', fileKey);
+      try {
+        return new Uint8Array(await readFile(file));
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code === 'ENOENT') return null;
+        throw error;
+      }
     }
+    const result = await db?.storage.from('everlight-scene-art').download(fileKey);
+    return result?.data ?? null;
   }
 
-  const db = createClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.SUPABASE_SERVICE_ROLE_KEY!, {
-    auth: { persistSession: false },
-  });
-  const { data } = await db.storage.from('everlight-scene-art').download(key);
-  return data ? new Response(data, { headers }) : new Response(null, { status: 404 });
+  const image = await load(key, bundled && !previous);
+  const fallback = !image && previous ? await load(fallbackKey, bundled) : null;
+  return image || fallback ? new Response(image ?? fallback, {
+    headers: {
+      'Content-Type': 'image/webp',
+      'Cache-Control': 'private, no-store',
+      'X-Everlight-Art': fallback ? 'fallback' : previous ? 'action' : 'scene',
+    },
+  }) : new Response(null, { status: 404 });
 }
 
 export async function GET(req:NextRequest){try{const session=readSession(req);if(!session)return NextResponse.json({error:'Sign in or join with your invitation.'},{status:401});const s=await getState();if(req.nextUrl.searchParams.has('art'))return await sceneArt(req,session,s);return NextResponse.json(session.kind==='dm'?{state:s,days,flames,familyPlans}:{player:playerView(s,session.playerId!)});}catch(e){return NextResponse.json({error:e instanceof Error?e.message:'Unable to load game.'},{status:500})}}

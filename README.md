@@ -51,7 +51,7 @@ Supabase stores the campaign in a protected JSONB row. Server routes use the ser
 
 ## Character scene art
 
-Use Node.js 22.18 or newer. The four Pip checkpoint illustrations ship with the app. Other illustrated checkpoints use the same story text as the player screen, and each hero gets an image based on their Pip reference.
+Use Node.js 22.18 or newer. The four Pip checkpoint illustrations ship with the app. Each hero’s picture uses their last saved choice from an earlier checkpoint when available. It depicts the attempt and leaves the outcome open. When there is no saved choice, the script uses the current scene. The player can keep using an existing scene illustration while an action illustration is being generated.
 
 - Preview the scene prompts without generating images: `npm run scene-art -- --dry-run --day 2 --checkpoint 5`.
 - While playing locally, run `npm run scene-art -- --watch` from the project folder. With `OPENAI_API_KEY` set in `.env.local`, it checks the current checkpoint every 30 seconds and generates missing hero images under `.everlight-art`. An image appears on the player's adventure screen when ready.
