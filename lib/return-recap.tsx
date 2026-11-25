@@ -1,25 +1,29 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import type { PlayerId } from './game';
+import { heroSpeakers, type Speaker, type StoryLine } from './story-voices';
 
 const INACTIVITY_MS = 60 * 60 * 1000;
 const SAVE_INTERVAL_MS = 15 * 1000;
 
 type ReturnRecapProps = {
-  playerId: string;
+  playerId: PlayerId;
   hero: string;
   place: string;
+  day: number;
   checkpoint: number;
-  scene: string;
+  scene: StoryLine[];
   lastUpdate: string;
   nextAction: string;
-  readAloud: (text: string) => void;
+  readAloud: (lines: StoryLine[]) => void;
 };
 
 export function ReturnRecap({
-  playerId, hero, place, checkpoint, scene, lastUpdate, nextAction, readAloud,
+  playerId, hero, place, day, checkpoint, scene, lastUpdate, nextAction, readAloud,
 }: ReturnRecapProps) {
   const [open, setOpen] = useState(false);
+  const [selection, setSelection] = useState<{ sceneKey: string; speaker: Speaker } | null>(null);
 
   useEffect(() => {
     const key = `everlight:last-play:${playerId}`;
@@ -80,8 +84,31 @@ export function ReturnRecap({
   }
 
   const storyLocation = `You’re in ${place} at checkpoint ${checkpoint}.`;
-  const recap = [`Welcome back, ${hero}.`, storyLocation, lastUpdate, scene, nextAction]
-    .filter(Boolean).join(' ');
+  const sceneText = scene.map(line => line.text).join(' ');
+  const heroSpeaker = heroSpeakers[playerId];
+  const sceneSpeakers = [...new Set(scene.map(line => line.speaker))].filter(speaker => speaker !== 'narrator');
+  const choices: Speaker[] = [...new Set<Speaker>([...sceneSpeakers, heroSpeaker, 'narrator'])];
+  const sceneKey = `${day}-${checkpoint}`;
+  const speaker = selection?.sceneKey === sceneKey && choices.includes(selection.speaker)
+    ? selection.speaker
+    : sceneSpeakers.at(-1) ?? heroSpeaker;
+  const names: Record<Speaker, string> = {
+    narrator: 'Narrator',
+    dawnshield: 'Dawnshield',
+    astra: 'Q’Astra',
+    violet: 'Violet',
+    taylor: 'Taylor',
+    pip: 'Pip',
+    keeper: 'The Keeper',
+    maribel: 'Maribel Thorn',
+    orin: day < 4 ? 'A voice from the invitation' : checkpoint === 1 && day === 4 ? 'The crowned shadow' : 'Orin Vale',
+  };
+  const recap = speaker === 'narrator'
+    ? [`Welcome back, ${hero}.`, storyLocation, lastUpdate, sceneText, nextAction]
+    : [
+      speaker === heroSpeaker ? 'Let me catch up before we go on.' : `Welcome back, ${hero}. Here’s where we left off.`,
+      `We’re in ${place}.`, lastUpdate, sceneText, nextAction,
+    ];
 
   return (
     <section className="notice" aria-labelledby="return-recap-title">
@@ -89,11 +116,20 @@ export function ReturnRecap({
       <div aria-live="polite">
         <p>{storyLocation}</p>
         {lastUpdate && <p><strong>Last party update</strong><br />{lastUpdate}</p>}
-        <p><strong>Current scene</strong><br />{scene}</p>
+        <p><strong>Current scene</strong><br />{sceneText}</p>
         <p>{nextAction}</p>
       </div>
+      <label htmlFor="recap-speaker">Who gives the recap?</label>
+      <select id="recap-speaker" value={speaker} onChange={event => {
+        const choice = choices.find(item => item === event.target.value);
+        if (choice) setSelection({ sceneKey, speaker: choice });
+      }}>
+        {choices.map(choice =>
+          <option key={choice} value={choice}>{choice === heroSpeaker ? `My hero · ${hero}` : names[choice]}</option>
+        )}
+      </select>
       <div className="row">
-        <button type="button" onClick={() => readAloud(recap)}>Hear the recap</button>
+        <button type="button" onClick={() => readAloud([{ speaker, text: recap.filter(Boolean).join(' ') }])}>Hear the recap</button>
         <button type="button" className="primary" onClick={() => setOpen(false)}>Continue adventure</button>
       </div>
     </section>
