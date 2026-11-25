@@ -1,7 +1,7 @@
 'use client';
 
-import { useEffect, useState } from 'react';
-import type { PlayerId } from './game';
+import { useEffect, useRef, useState } from 'react';
+import type { PlayerId, RecapUpdate } from './game';
 import { heroSpeakers, type Speaker, type StoryLine } from './story-voices';
 
 const INACTIVITY_MS = 60 * 60 * 1000;
@@ -15,22 +15,33 @@ type ReturnRecapProps = {
   checkpoint: number;
   scene: StoryLine[];
   lastUpdate: string;
+  history: RecapUpdate[];
   nextAction: string;
   readAloud: (lines: StoryLine[], take?: 'baseline') => void;
 };
 
 export function ReturnRecap({
-  playerId, hero, place, day, checkpoint, scene, lastUpdate, nextAction, readAloud,
+  playerId, hero, place, day, checkpoint, scene, lastUpdate, history, nextAction, readAloud,
 }: ReturnRecapProps) {
   const [open, setOpen] = useState(false);
   const [selection, setSelection] = useState<{ sceneKey: string; speaker: Speaker } | null>(null);
+
+  const latest = useRef({ day, checkpoint, updateId: history.at(-1)?.id ?? 0 });
+  const [returnFrom, setReturnFrom] = useState<typeof latest.current | null>(null);
+
+  useEffect(() => {
+    latest.current = { day, checkpoint, updateId: history.at(-1)?.id ?? 0 };
+  }, [day, checkpoint, history]);
 
   useEffect(() => {
     const key = `everlight:last-play:${playerId}`;
     let lastActive = 0;
     let lastSaved = 0;
+    let lastSeen: typeof latest.current | null = null;
     try {
-      lastActive = Number(localStorage.getItem(key)) || 0;
+      const saved = JSON.parse(localStorage.getItem(key) ?? 'null');
+      lastActive = typeof saved === 'number' ? saved : saved?.at ?? 0;
+      lastSeen = typeof saved?.seen?.updateId === 'number' ? saved.seen : null;
       lastSaved = lastActive;
     } catch {
       // Keep tracking in this tab when browser storage is unavailable.
@@ -39,7 +50,7 @@ export function ReturnRecap({
     function saveActivity() {
       if (!lastActive) return;
       try {
-        localStorage.setItem(key, String(lastActive));
+        localStorage.setItem(key, JSON.stringify({ at: lastActive, seen: lastSeen }));
         lastSaved = lastActive;
       } catch {
         // A blocked preference store should not interrupt the adventure.
@@ -49,9 +60,16 @@ export function ReturnRecap({
     function markReturn() {
       if (document.visibilityState !== 'visible') return;
       const now = Date.now();
-      if (lastActive > 0 && now - lastActive >= INACTIVITY_MS) setOpen(true);
+      if (lastActive > 0 && now - lastActive >= INACTIVITY_MS) {
+        setReturnFrom(lastSeen);
+        setOpen(true);
+      }
+      const position = latest.current;
+      const moved = lastSeen?.day !== position.day || lastSeen?.checkpoint !== position.checkpoint ||
+        lastSeen?.updateId !== position.updateId;
+      lastSeen = position;
       lastActive = now;
-      if (!lastSaved || now - lastSaved >= SAVE_INTERVAL_MS || now < lastSaved) saveActivity();
+      if (moved || !lastSaved || now - lastSaved >= SAVE_INTERVAL_MS || now < lastSaved) saveActivity();
     }
 
     function onVisibilityChange() {
@@ -103,11 +121,23 @@ export function ReturnRecap({
     maribel: 'Maribel Thorn',
     orin: day < 4 ? 'A voice from the invitation' : checkpoint === 1 && day === 4 ? 'The crowned shadow' : 'Orin Vale',
   };
+  const missed = returnFrom ? history.filter(update => update.id > returnFrom.updateId) : [];
+  const changedCheckpoint = returnFrom && (day !== returnFrom.day || checkpoint !== returnFrom.checkpoint);
+  const recent = missed.slice(-3).map(update => update.text);
+  const older = returnFrom && recent.length && history[0]?.id > returnFrom.updateId + 1;
+  const updates = recent.length
+    ? [...(missed.length > recent.length || older ? ['Here are the latest updates.'] : []), ...recent]
+    : returnFrom
+      ? [changedCheckpoint
+        ? `The party moved from day ${returnFrom.day}, checkpoint ${returnFrom.checkpoint}, to this scene.`
+        : 'The party is still at the checkpoint where you left off.']
+      : [];
+  const partyUpdate = updates.length ? ['While you were away.', ...updates] : [lastUpdate];
   const recap = speaker === 'narrator'
-    ? [`Welcome back, ${hero}.`, storyLocation, lastUpdate, sceneText, nextAction]
+    ? [`Welcome back, ${hero}.`, storyLocation, ...partyUpdate, sceneText, nextAction]
     : [
       speaker === heroSpeaker ? 'Let me catch up before we go on.' : `Welcome back, ${hero}. Here’s where we left off.`,
-      `We’re in ${place}.`, lastUpdate, sceneText, nextAction,
+      `We’re in ${place}.`, ...partyUpdate, sceneText, nextAction,
     ];
 
   const recapLine = { speaker, text: recap.filter(Boolean).join(' ') };
@@ -116,7 +146,9 @@ export function ReturnRecap({
       <h3 id="return-recap-title">Welcome back, {hero}</h3>
       <div aria-live="polite">
         <p>{storyLocation}</p>
-        {lastUpdate && <p><strong>Last party update</strong><br />{lastUpdate}</p>}
+        {updates.length > 0
+          ? <div><strong>While you were away</strong><ul>{updates.map((update, i) => <li key={i}>{update}</li>)}</ul></div>
+          : lastUpdate && <p><strong>Last party update</strong><br />{lastUpdate}</p>}
         <p><strong>Current scene</strong><br />{sceneText}</p>
         <p>{nextAction}</p>
       </div>
