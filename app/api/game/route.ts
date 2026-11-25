@@ -1,15 +1,17 @@
 import { sceneArtPlan } from '@/lib/scene-art-plan';
+import { buildSceneArtPrompt, generatedSceneArtKey } from '@/lib/scene-art-prompt';
 import { speechInstructions } from '@/lib/voice-direction';
 import { hasSharedStory, heroSpeakers, sharedStory, voices, type Speaker } from '@/lib/story-voices';
 
 import { NextRequest, NextResponse } from 'next/server';
 import { randomBytes, createHmac, timingSafeEqual, createHash } from 'node:crypto';
-import { readFile, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { createClient } from '@supabase/supabase-js';
 import { createInitialState, days, familyPlans, flames, type CampaignState, type PlayerId } from '@/lib/game';
 
 export const runtime='nodejs';
+export const maxDuration=60;
 const DM_COOKIE='everlight_dm_session';const PLAYER_COOKIE='everlight_player_session';
 type Session={kind:'dm'|'player';playerId?:PlayerId;exp:number};
 function secret(){const s=process.env.SESSION_SECRET;if(s)return s;if(process.env.NODE_ENV!=='production')return 'local-dev-session-secret-change-before-deploy';throw new Error('SESSION_SECRET is required.');}
@@ -47,7 +49,7 @@ async function sceneArt(req: NextRequest, session: Session, state: CampaignState
 
   const { key, fallbackKey, bundled, previous } = sceneArtPlan(state, playerId);
   const local = localEnabled();
-  const db = local || (bundled && !previous) ? null : createClient(
+  const db = local ? null : createClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.SUPABASE_SERVICE_ROLE_KEY!, {
       auth: { persistSession: false },
     },
@@ -69,6 +71,10 @@ async function sceneArt(req: NextRequest, session: Session, state: CampaignState
     return result?.data ?? null;
   }
 
+  const generated = await load(generatedSceneArtKey(state));
+  if (generated) return new Response(generated, {
+    headers: { 'Content-Type': 'image/webp', 'Cache-Control': 'private, no-store', 'X-Everlight-Art': 'generated' },
+  });
   const image = await load(key, bundled && !previous);
   const fallback = !image && previous ? await load(fallbackKey, bundled) : null;
   return image || fallback ? new Response(image ?? fallback, {
@@ -118,7 +124,33 @@ export async function POST(req:NextRequest){
    });
  }
  if(body.action==='checkOpenAI'){if(session.kind!=='dm')return deny();const key=process.env.OPENAI_API_KEY;if(!key)return NextResponse.json({ok:false,configured:false,message:'OPENAI_API_KEY is not configured for this deployment.'},{status:503});try{const response=await fetch('https://api.openai.com/v1/responses',{method:'POST',headers:{Authorization:`Bearer ${key}`,'Content-Type':'application/json'},body:JSON.stringify({model:process.env.OPENAI_MODEL||'gpt-6.2-sol',input:'Reply with OK.',max_output_tokens:64}),signal:AbortSignal.timeout(12000)});if(!response.ok){const upstream=await response.json().catch(()=>null) as {error?:{message?:string}}|null;const detail=upstream?.error?.message;return NextResponse.json({ok:false,configured:true,message:detail?`OpenAI rejected the health check: ${detail}`:`OpenAI returned HTTP ${response.status}. Check the key, project access, and configured model.`},{status:502});}return NextResponse.json({ok:true,configured:true,message:'OpenAI connection is working.'})}catch{return NextResponse.json({ok:false,configured:true,message:'Could not reach OpenAI from this deployment.'},{status:502})}}
- const s=await getState();const dm=session.kind==='dm';const actor=session.playerId;if(body.action==='startSession'){if(!dm)return deny();if(s.sessionStartedAt)return NextResponse.json({ok:true,startedAt:s.sessionStartedAt});s.sessionStartedAt=new Date().toISOString();s.sessionLogStartIndex=s.log.length;s.sessionRecap=null;addLog(s,'The one-hour Everlight session began.');await saveState(s);return NextResponse.json({ok:true,startedAt:s.sessionStartedAt});}
+ const s=await getState();const dm=session.kind==='dm';const actor=session.playerId;
+ if(body.action==='generateSceneArt'){
+  if(dm||!actor)return deny();
+  if(!hasSharedStory(s.day,s.checkpoint))return bad('Scene art is available at a shared story checkpoint.');
+  const apiKey=process.env.OPENAI_API_KEY;
+  if(!apiKey)return NextResponse.json({error:'OPENAI_API_KEY is not configured for scene art.'},{status:503});
+  const cacheKey=generatedSceneArtKey(s);
+  const local=localEnabled();
+  const db=local?null:createClient(process.env.NEXT_PUBLIC_SUPABASE_URL!,process.env.SUPABASE_SERVICE_ROLE_KEY!,{auth:{persistSession:false}});
+  if(local){
+   try{await readFile(path.join(process.cwd(),'.everlight-art',cacheKey));return NextResponse.json({ok:true,cached:true});}
+   catch(error){if((error as NodeJS.ErrnoException).code!=='ENOENT')throw error;}
+  } else {
+   const cached=await db!.storage.from('everlight-scene-art').download(cacheKey);
+   if(cached.data)return NextResponse.json({ok:true,cached:true});
+  }
+  const response=await fetch('https://api.openai.com/v1/images/generations',{method:'POST',headers:{Authorization:'Bearer '+apiKey,'Content-Type':'application/json'},body:JSON.stringify({model:process.env.OPENAI_IMAGE_MODEL||'gpt-image-2.5-flare',prompt:buildSceneArtPrompt(s),n:1,size:'1024x1024',quality:'low',output_format:'webp',output_compression:80}),signal:AbortSignal.timeout(55_000)});
+  if(!response.ok){const upstream=await response.json().catch(()=>null) as {error?:{message?:string}}|null;return NextResponse.json({error:upstream?.error?.message||'OpenAI could not generate the scene illustration.'},{status:502});}
+  const generated=await response.json() as {data?:{b64_json?:string}[]};
+  const encoded=generated.data?.[0]?.b64_json;
+  if(!encoded)return NextResponse.json({error:'OpenAI returned no scene image.'},{status:502});
+  const bytes=Buffer.from(encoded,'base64');
+  if(local){const directory=path.join(process.cwd(),'.everlight-art');await mkdir(directory,{recursive:true});await writeFile(path.join(directory,cacheKey),bytes);}
+  else {const upload=await db!.storage.from('everlight-scene-art').upload(cacheKey,bytes,{contentType:'image/webp',upsert:true});if(upload.error)return NextResponse.json({error:'The image was generated but could not be saved to the scene gallery.'},{status:502});}
+  return NextResponse.json({ok:true});
+ }
+ if(body.action==='startSession'){if(!dm)return deny();if(s.sessionStartedAt)return NextResponse.json({ok:true,startedAt:s.sessionStartedAt});s.sessionStartedAt=new Date().toISOString();s.sessionLogStartIndex=s.log.length;s.sessionRecap=null;addLog(s,'The one-hour Everlight session began.');await saveState(s);return NextResponse.json({ok:true,startedAt:s.sessionStartedAt});}
  if(body.action==='completeSessionRecap'){if(!dm)return deny();if(s.sessionRecap)return NextResponse.json({ok:true,recap:s.sessionRecap});if(!s.sessionStartedAt)return bad('Start a session before creating its recap.');const elapsed=Date.now()-new Date(s.sessionStartedAt).getTime();if(elapsed<60*60*1000&&!body.force)return bad('The one-hour session timer has not finished yet.');const day=days[s.day-1];const currentChoiceSet=s.storyChoices[String(s.day)+'-'+String(s.checkpoint)]??{};const latestChoices=(Object.keys(currentChoiceSet) as PlayerId[]).map(id=>{const choice=currentChoiceSet[id];return choice?s.players[id].name+' chose '+choice.label+': '+choice.action:''}).filter(Boolean);const recorded=[...s.log.slice(Math.max(0,s.sessionLogStartIndex)),...latestChoices,...(s.narration?[s.narration]:[])].slice(-24);const events=recorded.length?recorded:['The party reached checkpoint '+s.checkpoint+' in '+day.title+'.'];const latestCheck=s.lastCheck?['Physical roll: '+s.lastCheck.label+', '+s.lastCheck.roll+'+'+s.lastCheck.modifier+'='+s.lastCheck.total+' against DC '+s.lastCheck.dc+' ('+(s.lastCheck.success?'success':'miss')+').']:[];const facts=[...events,...latestCheck];const apiKey=process.env.OPENAI_API_KEY;let narration='';let visualBeats:string[]=[];if(apiKey){try{const response=await fetch('https://api.openai.com/v1/responses',{method:'POST',headers:{'Authorization':'Bearer '+apiKey,'Content-Type':'application/json'},body:JSON.stringify({model:process.env.OPENAI_MODEL||'gpt-6.2-sol',instructions:'Write an immersive, spoken Everlight family recap of about 60 seconds. Open by grounding the family in the established time of day, place, light, sounds, mood, and ordinary background activity. Build a clear story arc from the recorded events: what the heroes noticed, chose, tried, and what the dice actually decided; close at the exact saved checkpoint with a natural invitation to continue. Use only recorded choices, actions, and dice for plot events. Never invent a character action, clue, success, failure, reward, or consequence. You may add gentle, non-plot atmosphere from the supplied setting notes, but it must not alter continuity. Return valid JSON with keys narration and visualBeats (exactly 3 cinematic image or video prompts faithfully depicting recorded actions with the heroes centered). These are prompts, not generated media. Keep it family-friendly and do not reveal future secrets.',input:JSON.stringify({day:day.title,checkpoint:s.checkpoint,timeOfDay:day.timeOfDay,place:day.map,ambientSetting:day.ambientContext,heroes:Object.values(s.players).map(p=>p.character||p.name),recordedEvents:facts}),max_output_tokens:700})});if(response.ok){const data=await response.json() as {output_text?:string;output?:{content?:{text?:string}[]}[]};const output=data.output_text??data.output?.flatMap(x=>x.content??[]).map(x=>x.text??'').join('')??'';const parsed=JSON.parse(output) as {narration?:string;visualBeats?:string[]};narration=(parsed.narration??'').trim();visualBeats=Array.isArray(parsed.visualBeats)?parsed.visualBeats.slice(0,3):[];}}catch{}}
  if(!narration)narration='The story opens during '+day.timeOfDay.toLowerCase()+' at '+day.map+'. '+day.ambientContext+' The Everlight heroes '+facts.join(' ')+' The story rests at checkpoint '+s.checkpoint+'; the next scene is ready when the family returns.';while(visualBeats.length<3){const event=facts[Math.min(visualBeats.length,facts.length-1)]||'The party holds together at checkpoint '+s.checkpoint+'.';visualBeats.push('Cinematic Everlight still, Dawnshield, Q’Astra, Violet, and Taylor at the center of the scene, faithfully showing: '+event+' Warm storybook lighting; family-friendly; no invented action.');}s.sessionRecap={createdAt:new Date().toISOString(),narration,events:facts,visualBeats};s.sessionStartedAt=null;addLog(s,'The one-hour session recap was saved.');await saveState(s);return NextResponse.json({ok:true,recap:s.sessionRecap});}
  

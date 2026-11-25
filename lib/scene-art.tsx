@@ -6,6 +6,9 @@ export function SceneArt({ day, checkpoint, hero }: { day: number; checkpoint: n
   const [image, setImage] = useState('');
   const [status, setStatus] = useState('Loading scene artwork…');
   const [isAction, setIsAction] = useState(false);
+  const [reload, setReload] = useState(0);
+  const [generating, setGenerating] = useState(false);
+  const [generationError, setGenerationError] = useState('');
 
   useEffect(() => {
     const controller = new AbortController();
@@ -13,6 +16,7 @@ export function SceneArt({ day, checkpoint, hero }: { day: number; checkpoint: n
     let imageUrl: string | undefined;
 
     async function load() {
+      setStatus('Loading scene artwork.');
       try {
         const response = await fetch(`/api/game?view=player&art=1&day=${day}&checkpoint=${checkpoint}`, {
           signal: controller.signal,
@@ -52,13 +56,38 @@ export function SceneArt({ day, checkpoint, hero }: { day: number; checkpoint: n
       clearTimeout(timer);
       if (imageUrl) URL.revokeObjectURL(imageUrl);
     };
-  }, [day, checkpoint]);
+  }, [day, checkpoint, reload]);
 
-  if (!image) return <p className="small" role="status">{status}</p>;
+  async function generateScene() {
+    setGenerating(true);
+    setGenerationError('');
+    try {
+      const response = await fetch('/api/game', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'x-everlight-portal': 'player' },
+        body: JSON.stringify({ action: 'generateSceneArt' }),
+      });
+      const result = await response.json() as { error?: string };
+      if (!response.ok) throw new Error(result.error || 'Could not create the scene illustration.');
+      setReload((value) => value + 1);
+    } catch (error) {
+      setGenerationError(error instanceof Error ? error.message : 'Could not create the scene illustration.');
+    } finally {
+      setGenerating(false);
+    }
+  }
+
   // The URL is a local blob fetched through the authenticated player session.
-  return <figure style={{margin:'10px 0'}}>
-    <img src={image} alt={isAction ? `An illustration of ${hero}’s last choice` : `The current Everlight scene from ${hero}’s perspective`}
-      style={{ width:'100%', height:'auto', borderRadius:12 }} />
-    {isAction && <figcaption className="small">Your last choice</figcaption>}
-  </figure>;
+  return <div style={{margin:'10px 0'}}>
+    {image ? <figure style={{margin:'0 0 10px'}}>
+      <img src={image} alt={isAction ? `An illustration of ${hero}'s last choice` : `The current Everlight scene from ${hero}'s perspective`}
+        style={{ width:'100%', height:'auto', borderRadius:12 }} />
+      {isAction && <figcaption className="small">Your last choice</figcaption>}
+    </figure> : <p className="small" role="status">{status}</p>}
+    <button type="button" className="quiet" onClick={generateScene} disabled={generating}>
+      {generating ? 'Creating scene illustration…' : image ? 'Refresh scene illustration' : 'Generate scene illustration'}
+    </button>
+    <p className="small" aria-live="polite">{generationError || (generating ? 'Everlight is illustrating the heroes and characters present in this scene.' : '')}</p>
+    <p className="small">Uses OpenAI image credits. One image is cached for this scene.</p>
+  </div>;
 }
