@@ -1,4 +1,4 @@
-import { sharedStory, voices, type Speaker } from '@/lib/story-voices';
+import { hasSharedStory, heroSpeakers, sharedStory, voices, type Speaker } from '@/lib/story-voices';
 
 import { NextRequest, NextResponse } from 'next/server';
 import { randomBytes, createHmac, timingSafeEqual, createHash } from 'node:crypto';
@@ -28,7 +28,39 @@ async function saveState(state:CampaignState){
 }
 function playerView(s:CampaignState,id:PlayerId){const p=s.players[id];return {player:{...p,clues:s.deliveredClues[id]??[]},day:s.day,flames:s.flames.map(n=>flames.find(f=>f.name===n)).filter(Boolean),mapUnlocked:s.mapUnlocked,missions:s.missions.filter(m=>m.day<=s.day),familyPlans,completedPlanIds:s.completedPlanIds,dmMode:s.dmMode,checkpoint:s.checkpoint,storyProgress:s.storyProgress,lastCheck:s.lastCheck,narration:s.narration,storyChoices:s.storyChoices?.[String(s.day)+'-'+String(s.checkpoint)]??{},party:Object.values(s.players).map(({id,name,character,className,joined})=>({id,name,character,className,joined}))}}
 function addLog(s:CampaignState,msg:string){s.log.push(`${new Date().toLocaleTimeString([], {hour:'numeric',minute:'2-digit'})} — ${msg}`);s.log=s.log.slice(-80)}
-export async function GET(req:NextRequest){try{const session=readSession(req);if(!session)return NextResponse.json({error:'Sign in or join with your invitation.'},{status:401});const s=await getState();return NextResponse.json(session.kind==='dm'?{state:s,days,flames,familyPlans}:{player:playerView(s,session.playerId!)});}catch(e){return NextResponse.json({error:e instanceof Error?e.message:'Unable to load game.'},{status:500})}}
+async function sceneArt(req: NextRequest, session: Session, state: CampaignState) {
+  const playerId = session.playerId;
+  const { day, checkpoint } = state;
+  const query = req.nextUrl.searchParams;
+  if (session.kind !== 'player' || !playerId || !Object.hasOwn(heroSpeakers, playerId) ||
+      query.get('day') !== String(day) || query.get('checkpoint') !== String(checkpoint) ||
+      !hasSharedStory(day, checkpoint)) {
+    return new Response(null, { status: 404 });
+  }
+
+  const headers = { 'Content-Type': 'image/webp', 'Cache-Control': 'private, no-store' };
+  const key = `day-${day}-checkpoint-${checkpoint}-${playerId}.webp`;
+  if (localEnabled() || (day <= 2 && checkpoint === 4)) {
+    const file = day <= 2 && checkpoint === 4
+      ? path.join(process.cwd(), 'assets', 'scene-art', playerId + '.webp')
+      : path.join(process.cwd(), '.everlight-art', key);
+    try {
+      const image = await readFile(file);
+      return new Response(new Uint8Array(image), { headers });
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') return new Response(null, { status: 404 });
+      throw error;
+    }
+  }
+
+  const db = createClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.SUPABASE_SERVICE_ROLE_KEY!, {
+    auth: { persistSession: false },
+  });
+  const { data } = await db.storage.from('everlight-scene-art').download(key);
+  return data ? new Response(data, { headers }) : new Response(null, { status: 404 });
+}
+
+export async function GET(req:NextRequest){try{const session=readSession(req);if(!session)return NextResponse.json({error:'Sign in or join with your invitation.'},{status:401});const s=await getState();if(req.nextUrl.searchParams.has('art'))return await sceneArt(req,session,s);return NextResponse.json(session.kind==='dm'?{state:s,days,flames,familyPlans}:{player:playerView(s,session.playerId!)});}catch(e){return NextResponse.json({error:e instanceof Error?e.message:'Unable to load game.'},{status:500})}}
 export async function POST(req:NextRequest){
  try{
  const body=await req.json() as {action:string;password?:string;code?:string;playerId?:PlayerId;missionId?:number;note?:string;clue?:string;roll?:number;modifier?:number;dc?:number;label?:string;amount?:number;character?:string;className?:string;preferences?:string[];ready?:boolean;hp?:number;maxHp?:number;defense?:number;day?:number;enemy?:{name:string;hp:number;defense:number;attack:number;damage:string};ending?:string;reward?:string;spell?:string;item?:string;mode?:'ai'|'human';text?:string;speaker?:Speaker;planId?:string;choice?:{label?:string;action?:string;dialogue?:string}}; if(body.action==='login'){const expected=process.env.DM_PASSWORD;if(!expected)return NextResponse.json({error:'Configure DM_PASSWORD in .env.local before signing in.'},{status:503});const a=Buffer.from(body.password??''),b=Buffer.from(expected);if(a.length!==b.length||!timingSafeEqual(a,b))return NextResponse.json({error:'Incorrect DM password.'},{status:401});const res=NextResponse.json({ok:true});setCookie(res,{kind:'dm',exp:Date.now()+7*86400000});return res;}

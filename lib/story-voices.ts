@@ -85,3 +85,7 @@ const betweenDays = [narratorLine('Pause here while the DM prepares the next par
 export function sharedStory(day: number, checkpoint: number): StoryLine[] {
   return campaignScenes[day]?.[checkpoint - 1] ?? betweenDays;
 }
+
+export function hasSharedStory(day: number, checkpoint: number): boolean {
+  return Boolean(campaignScenes[day]?.[checkpoint - 1]);
+}
