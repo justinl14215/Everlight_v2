@@ -1,0 +1,177 @@
+:root {
+  color-scheme: dark;
+  --paper: #101820;
+  --card: #1c2935;
+  --soft: #263643;
+  --line: #475561;
+  --ink: #fff3de;
+  --sub: #bfcbd4;
+  --gold: #f3cc85;
+  --green: #eed093;
+  --red: #ffb2a2;
+  --violet: #d6b7ed;
+  --display: Georgia, 'Times New Roman', serif;
+}
+
+body {
+  background:
+    radial-gradient(ellipse at 16% 0%, #35304a 0, transparent 46rem),
+    radial-gradient(ellipse at 92% 12%, #453220 0, transparent 32rem),
+    var(--paper);
+  color: var(--ink);
+}
+
+a, .textLink { color: var(--gold); }
+button {
+  background: #293b49;
+  border-color: #596674;
+  color: var(--ink);
+}
+button:hover { border-color: var(--gold); }
+.primary, .day.active {
+  background: var(--green);
+  border-color: var(--green);
+  color: #231a12;
+}
+.primary:hover, .day.active:hover { background: #ffe0a4; }
+.quiet { background: #182632; }
+button:focus-visible, input:focus-visible, select:focus-visible,
+textarea:focus-visible, summary:focus-visible, a:focus-visible {
+  outline: 2px solid var(--gold);
+  outline-offset: 3px;
+}
+
+.topbar h1, .playerTop h1, .loginCard h1, .heroCard h2, .playerHero h2,
+.storyIntro h2, .heroIdentity h2, .panel h3, .flameCard h3 {
+  font-family: var(--display);
+  font-weight: 600;
+  letter-spacing: -.025em;
+}
+.topbar h1, .playerTop h1 { font-size: clamp(1.7rem, 3vw, 2.55rem); }
+.topbar h1 span, .heroMeta, .eyebrow { color: var(--gold); }
+.eyebrow { font-size: .72rem; letter-spacing: .12em; }
+.muted, .small { color: var(--sub); font-size: .82rem; }
+
+.loginWrap {
+  background:
+    linear-gradient(90deg, #111a25eb 0%, #111a2577 63%, #111a258c 100%),
+    url('/everlight/pip-at-twilight.webp') center / cover no-repeat;
+  min-height: 100dvh;
+}
+.loginCard, .flameCard, .panel, .playerCard {
+  background: linear-gradient(145deg, #263746, var(--card) 76%);
+  border: 1px solid var(--line);
+  color: var(--ink);
+  box-shadow: 0 12px 24px #080c1340;
+}
+.loginCard { background: #192532f5; }
+.loginCard .sigil { color: var(--gold); }
+.loginCard input, .playerShell input, .playerShell select, .playerShell textarea,
+.panel input, .panel select, .panel textarea, .clueComposer select {
+  background: #131f2a;
+  border: 1px solid #61717e;
+  border-radius: 9px;
+  color: var(--ink);
+  padding: .55rem .7rem;
+}
+input::placeholder, textarea::placeholder { color: #aab9c5; }
+.panel label, .loginCard label, .sceneList details p, .branchBox p, .clueList, .logList p { color: var(--sub); }
+.logList p { border-color: var(--line); }
+
+.heroRow { gap: 16px; }
+.heroCard, .playerHero, .juniorShell .playerHero {
+  background:
+    linear-gradient(90deg, #122334fc 0%, #152635ed 43%, #19263182 100%),
+    url('/everlight/pip-at-twilight.webp') center 44% / cover no-repeat;
+  border: 1px solid #6f6657;
+  box-shadow: 0 16px 36px #090e1766;
+}
+.heroCard { padding: clamp(1rem, 3vw, 2rem); }
+.heroCard h2, .playerHero h2 { font-size: clamp(1.55rem, 3vw, 2.45rem); }
+.heroCard > p { color: var(--ink); max-width: 66ch; }
+.dayButtons .day:not(.active) { background: #182632eb; border-color: #67747f; }
+.day.active b { color: #614414; }
+.flame { border-color: var(--line); }
+.flame em, .live, .success, .mapLocation.unlocked, .portalFlames .earned {
+  color: #caedd4;
+  background: #254439;
+}
+.notice.error { color: #ffd4cc; background: #462a30; border-color: #a57276; }
+.iconBtn { color: var(--red); }
+.pill, .joinBadge, .avatar {
+  color: #ffe2ad;
+  background: #483a32;
+}
+.meters, .planCard span, .preferenceLine { color: var(--sub) !important; }
+
+.playerStats > div, .mapLocation, .missionChoice, .planCard, .interestChoice,
+.enemyRow, .branchBox, .checkResult, .inviteCard, .invitePlaceholder,
+.missionPending, .missionMini, .combatPlayers > div, .clueList div, .empty, .qrWait,
+.logList li, .portalFlames span {
+  background: #162431;
+  color: var(--ink);
+  border-color: var(--line);
+}
+.missionChoice b { color: var(--ink); }
+.checkResult.success, .mapLocation.unlocked, .portalFlames .earned { background: #254439; color: #caedd4; }
+.checkResult.miss { background: #462a30; color: #ffd4cc; }
+.interestChoice.chosen { background: #3f3050; color: #fae8ff; border-color: #aa85be; }
+.inviteCard img { background: white; padding: 4px; }
+.notice { background: #243442; border: 1px solid var(--line); color: var(--ink); }
+.readAloud {
+  background: #131f2bc9;
+  border-left-color: var(--gold);
+  color: #f7e9d1;
+  font: 1rem/1.65 var(--display);
+}
+
+.playerShell { --hero-accent: var(--gold); }
+.playerShell[data-hero="harmony"] { --hero-accent: var(--violet); }
+.playerShell[data-hero="q"] { --hero-accent: #ffe0a3; }
+.playerShell[data-hero="taylor"] { --hero-accent: #b5d8f8; }
+.playerShell .heroMeta { color: var(--hero-accent); }
+.heroIdentity {
+  background: radial-gradient(ellipse at top, #3d334d 0%, transparent 65%), var(--card);
+  border-color: var(--hero-accent);
+}
+.heroIdentity img { box-shadow: 0 10px 32px #090c14a8; }
+.adventureShell { max-width: 1050px; min-height: 100dvh; }
+.storyPanel { padding: clamp(.85rem, 3vw, 1.5rem); }
+.storyGrid { display: grid; gap: 1rem; margin-top: 1rem; }
+.storyIntro { min-width: 0; }
+.storyIntro h2 { margin: .15rem 0 .7rem; font-size: clamp(1.65rem, 4vw, 2.6rem); line-height: 1.12; }
+.storyArt { min-width: 0; display: grid; align-content: center; }
+.storyArt figure { margin: 0 !important; }
+.storyArt img { border: 1px solid #73634f; display: block; }
+.storyArt figcaption { padding-top: .4rem; color: var(--hero-accent); }
+.storyTools, .storyChoiceRow, .row { display: flex; flex-wrap: wrap; gap: .55rem; align-items: center; }
+.storyTools audio { max-width: 100%; width: 100%; }
+.storyTools audio[hidden] { display: none; }
+.storyChoices { display: grid; gap: .65rem; margin-top: .7rem; }
+.storyChoiceRow { padding: .55rem; border: 1px solid var(--line); border-radius: 12px; background: #162431; align-items: stretch; }
+.storyChoiceRow .interestChoice { flex: 1 1 12rem; font-size: .95rem; text-align: left; }
+.storyChoiceRow .quiet { color: var(--hero-accent); }
+.storyParty { margin-top: .85rem; }
+.storyParty p { overflow-wrap: anywhere; }
+.adventureShell .panel h3 { margin-top: .85rem; }
+
+@media (min-width: 760px) {
+  .storyGrid:has(.storyArt) {
+    grid-template-columns: minmax(0, 1.35fr) minmax(0, 1fr);
+    align-items: center;
+  }
+}
+@media (max-width: 600px) {
+  .shell, .playerShell { padding: 1rem .75rem; }
+  .playerTop { gap: .6rem; align-items: flex-start; }
+  .playerTop h1 { line-height: 1.12; }
+  .playerTop .heroMeta { display: block; margin-top: .25rem; }
+  .playerShell button, .loginCard button { min-height: 44px; }
+  .storyIntro .readAloud { margin-block: .7rem; }
+  .storyChoiceRow .quiet { flex: 1 1 auto; }
+  .loginWrap { background-position: 65% center; }
+}
+@media (prefers-reduced-motion: reduce) {
+  button { transition: none; }
+  button:hover { transform: none; }
+}
