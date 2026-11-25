@@ -175,3 +175,17 @@ input::placeholder, textarea::placeholder { color: #aab9c5; }
   button { transition: none; }
   button:hover { transform: none; }
 }
+
+
+/* Keep pale hero cards readable against the dark portal theme. */
+.heroCardScreen { color: #26372f; border-color: #a89573; }
+.heroCardScreen h1 { color: #26372f; }
+.heroCardScreen .eyebrow, .heroCardScreen .heroMeta { color: #795a27; }
+.heroCardScreen .small { color: #526258; }
+
+/* The character roster uses a light surface, so give it matching dark text. */
+.characterRow { color: #26372f; background: #faf7f0; border-color: #a99a81; }
+.characterRow b { color: #26372f; }
+.characterRow small { color: #526258; }
+.characterRow:hover { background: #fffdf8; border-color: #8c6c35; }
+
