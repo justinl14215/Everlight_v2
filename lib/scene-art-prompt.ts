@@ -45,7 +45,7 @@ export function generatedSceneArtKey(state: CampaignState) {
 }
 
 export function buildSceneArtPrompt(state: CampaignState) {
-  const day = days[state.day - 1] as ((typeof days)[number] & { timeOfDay?: string; ambientContext?: string }) | undefined;
+  const day = days[state.day - 1];
   const cast = sceneCast(state);
   const scene = clean(state.narration || day?.opening || 'The party arrives at the next story moment.', 700);
   return [
