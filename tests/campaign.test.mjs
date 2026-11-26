@@ -46,3 +46,43 @@ test('story and scene-art previews are DM-only and do not persist campaign chang
   assert.doesNotMatch(previewHandlers,/saveState\(|addLog\(/);
   assert.match(previewHandlers,/SIMULATION ONLY — NOT CANON/);
 });
+
+test('DM flow previews are read-only and connect current choices, roll, and combat state to narration',async()=>{
+  const api=await readFile(new URL('../app/api/game/route.ts',import.meta.url),'utf8');
+  const flow=await readFile(new URL('../lib/dm-flow.ts',import.meta.url),'utf8');
+  assert.match(api,/Current party choices and actions:/);
+  assert.match(api,/Latest authoritative roll:/);
+  assert.match(api,/Combat tracker: \$\{battleState\}/);
+  assert.match(flow,/getCurrentCheckpointCheck/);
+});
+
+test('checkpoint skips require confirmation and preserve unresolved choices',async()=>{
+  const api=await readFile(new URL('../app/api/game/route.ts',import.meta.url),'utf8');
+  const page=await readFile(new URL('../app/page.tsx',import.meta.url),'utf8');
+  assert.match(api,/if\(!body\.skip\)return bad\('Confirm that you want to skip this checkpoint\.'/);
+  assert.match(api,/canSkipCheckpoint\(s\)/);
+  assert.match(page,/Skip this checkpoint without resolving party choices\?/);
+  assert.match(api,/DM skipped story checkpoint/);
+});
+
+test('AI narration provenance keeps AI mode active and human edits switch to human mode',async()=>{
+  const api=await readFile(new URL('../app/api/game/route.ts',import.meta.url),'utf8');
+  const page=await readFile(new URL('../app/page.tsx',import.meta.url),'utf8');
+  assert.match(api,/const fromAi=body\.narrationSource==='ai';s\.dmMode=fromAi\?'ai':'human'/);
+  assert.match(api,/DM used the AI narration and advanced the checkpoint/);
+  assert.match(page,/setNarrationSource\('ai'\)/);
+  assert.match(page,/setNarrationSource\('human'\)/);
+});
+
+test('DM checkpoint and ledger show the current story and separate earlier session events',async()=>{
+  const page=await readFile(new URL('../app/page.tsx',import.meta.url),'utf8');
+  assert.match(page,/Current story checkpoint/);
+  assert.doesNotMatch(page,/Most heroes asked for the Keeper; Violet chose the clock/);
+  assert.match(page,/Earlier campaign events/);
+  assert.match(page,/getCurrentCheckpointChoices/);
+});
+
+test('defeated enemies clear when advancing from battle aftermath',async()=>{
+  const api=await readFile(new URL('../app/api/game/route.ts',import.meta.url),'utf8');
+  assert.match(api,/if\(s\.combatPhase==='aftermath'\)\{s\.enemies=\[\];s\.combat=false;s\.combatPhase='inactive'/);
+});
