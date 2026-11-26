@@ -185,6 +185,33 @@ export async function POST(req:NextRequest){
  if(body.action==='updatePlayer'){const id=dm?(body.playerId??actor):actor;if(!id)return deny();if(body.character!==undefined&&body.character.length>10)return bad('Hero names can be up to 10 characters.');const p=s.players[id];if(body.character!==undefined)p.character=body.character;if(body.className!==undefined&& (dm||p.mode!=='junior'))p.className=body.className.slice(0,40);if(body.preferences!==undefined)p.preferences=body.preferences.slice(0,5).map(x=>x.slice(0,40));if(body.ready!==undefined)p.ready=body.ready;if(dm){if(typeof body.hp==='number')p.hp=Math.max(0,Math.min(p.maxHp,body.hp));if(typeof body.maxHp==='number')p.maxHp=Math.max(1,Math.min(99,body.maxHp));if(typeof body.defense==='number')p.defense=Math.max(1,Math.min(30,body.defense));}await saveState(s);return NextResponse.json({ok:true});}
  if(!dm)return deny();
  switch(body.action){
+  case 'forceStoryAction':{
+   const id=body.playerId;
+   if(!id||!Object.hasOwn(s.players,id))return bad('Choose a valid player to override.');
+   const raw=body.choice;
+   if(!raw||typeof raw.label!=='string'||typeof raw.action!=='string'||typeof raw.dialogue!=='string')return bad('Enter the forced choice, action, and dialogue.');
+   const choice={label:raw.label.trim().slice(0,100),action:raw.action.trim().slice(0,180),dialogue:raw.dialogue.trim().slice(0,240)};
+   if(!choice.label||!choice.action)return bad('The forced choice and action cannot be blank.');
+   if(s.storyProgress.phase==='acting'&&s.storyProgress.activePlayerId!==id)return bad('The team is already resolving another hero’s action. Override the active hero or wait for the next choice round.');
+   const key=String(s.day)+'-'+String(s.checkpoint);s.storyChoices[key]??={};s.storyChoices[key][id]=choice;
+   const joined=(Object.keys(s.players) as PlayerId[]).filter(playerId=>s.players[playerId].joined);
+   const expected=joined.length?joined:[id];
+   if(s.storyProgress.phase==='acting'){
+    s.storyProgress.action=choice;
+   }else{
+    const choices=s.storyChoices[key];const waiting=expected.filter(playerId=>!choices[playerId]);
+    if(!waiting.length){
+     const tally=new Map<string,number>();for(const playerId of expected){const label=choices[playerId]?.label;if(label)tally.set(label,(tally.get(label)??0)+1);}
+     const winner=Array.from(tally.entries()).sort((a,b)=>b[1]-a[1])[0]?.[0];
+     const active=expected.find(playerId=>choices[playerId]?.label===winner)??id;
+     s.storyProgress={phase:'acting',activePlayerId:active,action:choices[active],playersChosen:expected};
+     addLog(s,'All joined heroes have a choice. '+s.players[active].name+' leads the shared action.');
+    }
+   }
+   const message='DM forced '+s.players[id].name+' to '+choice.label+' at story checkpoint '+s.checkpoint+'.';
+   addLog(s,message);recordRecapUpdate(s,message);
+   await saveState(s);return NextResponse.json({ok:true,storyChoices:s.storyChoices[key],storyProgress:s.storyProgress});
+  }
   case 'approveMission':{const item=s.pending.find(x=>x.id===body.note);if(!item)return bad('Mission request no longer exists.');const m=s.missions.find(x=>x.id===item.missionId)!;s.pending=s.pending.filter(x=>x.id!==item.id);s.approved.push(m.id);const p=s.players[item.playerId];const reward=m.reward;const recipients=reward.toLowerCase().includes('shared')?Object.values(s.players):[p];for(const recipient of recipients){if(reward.toLowerCase().includes('gold'))recipient.gold+=2;if(reward.includes('Spark'))recipient.sparks+=1;recipient.inventory.push(`Mission: ${m.title}`);}const flame=flames.find(f=>f.day===m.day);if(flame&&!s.flames.includes(flame.name)&&m.reward.includes('mark'))addLog(s,`${p.name} earned a ${flame.name} gratitude mark.`);recordRecapUpdate(s,`The DM approved the mission “${m.title}.”`);addLog(s,`DM approved “${m.title}” for ${p.name}; shared mission progress recorded.`);await saveState(s);return NextResponse.json({ok:true});}
   case 'rejectMission':s.pending=s.pending.filter(x=>x.id!==body.note);await saveState(s);return NextResponse.json({ok:true});
   case 'awardFlame':{const flame=flames.find(f=>f.name===body.note);if(!flame)return bad('Unknown flame.');if(!s.flames.includes(flame.name))s.flames.push(flame.name);if(!s.mapUnlocked.includes(days[flame.day-1].map))s.mapUnlocked.push(days[flame.day-1].map);for(const p of Object.values(s.players)){if(!p.inventory.includes(flame.gift))p.inventory.push(flame.gift);if(flame.day===2&&!p.spells.includes('Starlight Reveal'))p.spells.push('Starlight Reveal');}addLog(s,`The Flame of ${flame.name} awakened and unlocked ${days[flame.day-1].map}.`);await saveState(s);return NextResponse.json({ok:true});}
@@ -206,3 +233,4 @@ export async function POST(req:NextRequest){
  }catch(e){return NextResponse.json({error:e instanceof Error?e.message:'Unexpected game error.'},{status:500})}
 }
 function deny(){return NextResponse.json({error:'This action is restricted to the Dungeon Master.'},{status:403})}function bad(message:string){return NextResponse.json({error:message},{status:400})}
+
