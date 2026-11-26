@@ -125,6 +125,36 @@ export async function POST(req:NextRequest){
  }
  if(body.action==='checkOpenAI'){if(session.kind!=='dm')return deny();const key=process.env.OPENAI_API_KEY;if(!key)return NextResponse.json({ok:false,configured:false,message:'OPENAI_API_KEY is not configured for this deployment.'},{status:503});try{const response=await fetch('https://api.openai.com/v1/responses',{method:'POST',headers:{Authorization:`Bearer ${key}`,'Content-Type':'application/json'},body:JSON.stringify({model:process.env.OPENAI_MODEL||'gpt-6.2-sol',input:'Reply with OK.',max_output_tokens:64}),signal:AbortSignal.timeout(12000)});if(!response.ok){const upstream=await response.json().catch(()=>null) as {error?:{message?:string}}|null;const detail=upstream?.error?.message;return NextResponse.json({ok:false,configured:true,message:detail?`OpenAI rejected the health check: ${detail}`:`OpenAI returned HTTP ${response.status}. Check the key, project access, and configured model.`},{status:502});}return NextResponse.json({ok:true,configured:true,message:'OpenAI connection is working.'})}catch{return NextResponse.json({ok:false,configured:true,message:'Could not reach OpenAI from this deployment.'},{status:502})}}
  const s=await getState();const dm=session.kind==='dm';const actor=session.playerId;
+ if(body.action==='testStoryForecast'){
+  if(!dm)return deny();
+  const startDay=Number(body.day??s.day);
+  const prompt=typeof body.text==='string'?body.text.trim():'';
+  if(!Number.isInteger(startDay)||startDay<1||startDay>5)return bad('Choose a story day from 1 to 5.');
+  if(prompt.length<8||prompt.length>1800)return bad('Enter a test scenario between 8 and 1,800 characters.');
+  const apiKey=process.env.OPENAI_API_KEY;
+  if(!apiKey)return NextResponse.json({error:'Story forecasting requires OPENAI_API_KEY on the server.'},{status:503});
+  const storyOutline=days.slice(startDay-1).map(day=>({day:day.day,title:day.title,place:day.map,time:day.timeOfDay,opening:day.opening,scenes:day.scenes,clues:day.clues,threat:day.threat,reward:day.reward,closing:day.closing}));
+  const current=s.day===startDay?{checkpoint:s.checkpoint,narration:s.narration,choices:s.storyChoices[String(s.day)+'-'+String(s.checkpoint)]??{},knownClues:s.knownClues}:null;
+  const response=await fetch('https://api.openai.com/v1/responses',{method:'POST',headers:{Authorization:'Bearer '+apiKey,'Content-Type':'application/json'},body:JSON.stringify({model:process.env.OPENAI_MODEL||'gpt-6.2-sol',instructions:'You are a test-only Everlight story simulator for the Dungeon Master. Everything you produce is hypothetical and must be labeled as a preview, never as a saved or canon event. Use the supplied authored outline as truth. Given the party choices, questions, and physical rolls, explain what the recorded rolls mean only when a modifier and DC are supplied; otherwise do not invent a result. Show 2-3 plausible branches, how each could lead into the remaining authored story, and one sample family-friendly AI Dungeon Master response to the scenario. Do not claim a hypothetical clue, action, reward, or outcome has happened. Do not contradict established facts. Keep the sample response concise and end with a clear question for players.',input:JSON.stringify({label:'SIMULATION ONLY — NOT CANON',startingDay:startDay,currentCampaignContext:current,authoredStoryOutline:storyOutline,testScenario:prompt}),max_output_tokens:950}),signal:AbortSignal.timeout(30000)});
+  if(!response.ok){const upstream=await response.json().catch(()=>null) as {error?:{message?:string}}|null;return NextResponse.json({error:upstream?.error?.message||'AI story preview failed ('+response.status+').'},{status:502});}
+  const data=await response.json() as {output_text?:string;output?:{content?:{text?:string}[]}[]};
+  const preview=data.output_text??data.output?.flatMap(x=>x.content??[]).map(x=>x.text??'').join('\n')??'';
+  if(!preview.trim())return NextResponse.json({error:'The AI returned an empty story preview.'},{status:502});
+  return NextResponse.json({preview},{headers:{'Cache-Control':'private, no-store'}});
+ }
+ if(body.action==='testSceneArt'){
+  if(!dm)return deny();
+  const testDay=Number(body.day??s.day);
+  if(!Number.isInteger(testDay)||testDay<1||testDay>5)return bad('Choose a story day from 1 to 5.');
+  const apiKey=process.env.OPENAI_API_KEY;
+  if(!apiKey)return NextResponse.json({error:'Scene art testing requires OPENAI_API_KEY on the server.'},{status:503});
+  const testState=structuredClone(s);testState.day=testDay;testState.checkpoint=1;
+  const response=await fetch('https://api.openai.com/v1/images/generations',{method:'POST',headers:{Authorization:'Bearer '+apiKey,'Content-Type':'application/json'},body:JSON.stringify({model:process.env.OPENAI_IMAGE_MODEL||'gpt-image-2.5-flare',prompt:buildSceneArtPrompt(testState),n:1,size:'1024x1024',quality:'low',output_format:'webp',output_compression:80}),signal:AbortSignal.timeout(55000)});
+  if(!response.ok){const upstream=await response.json().catch(()=>null) as {error?:{message?:string}}|null;return NextResponse.json({error:upstream?.error?.message||'Scene art test failed ('+response.status+').'},{status:502});}
+  const generated=await response.json() as {data?:{b64_json?:string}[]};const encoded=generated.data?.[0]?.b64_json;
+  if(!encoded)return NextResponse.json({error:'OpenAI returned no test image.'},{status:502});
+  return NextResponse.json({imageDataUrl:'data:image/webp;base64,'+encoded},{headers:{'Cache-Control':'private, no-store'}});
+ }
  if(body.action==='generateSceneArt'){
   if(dm||!actor)return deny();
   if(!hasSharedStory(s.day,s.checkpoint))return bad('Scene art is available at a shared story checkpoint.');

@@ -4,6 +4,9 @@ import { readFile } from 'node:fs/promises';
 const game=await readFile(new URL('../lib/game.ts',import.meta.url),'utf8');
 const api=await readFile(new URL('../app/api/game/route.ts',import.meta.url),'utf8');
 const player=await readFile(new URL('../app/player/page.tsx',import.meta.url),'utf8');
+const testLab=await readFile(new URL('../lib/feature-checks.ts',import.meta.url),'utf8');
+const testLabPage=await readFile(new URL('../app/test-lab/page.tsx',import.meta.url),'utf8');
+const dmPage=await readFile(new URL('../app/page.tsx',import.meta.url),'utf8');
 
 test('campaign contains five sessions and a complete five-flame track',()=>{
   for(const title of ['The Forgotten Village','Forest of Tangled Stars','Hall of Winter Wonders','Thanksgiving Grand Feast','The Kingdom Reborn'])assert.ok(game.includes(title),`missing ${title}`);
@@ -25,4 +28,21 @@ test('all four human heroes and family-week constraints are represented',()=>{
   for(const phrase of ['Groceries and shopping','Friendsgiving dinner','Teresa’s volunteer bag packing','Frisco / Plano plans','Optional Friday epilogue','Daily reading'])assert.ok(game.includes(phrase),`missing ${phrase}`);
   assert.ok(player.includes('30-SECOND SPOILER-FREE INVITATION'));
   assert.ok(player.includes('SpeechRecognition'));
+});
+
+test('DM Test Lab covers sandbox simulations and read-only AI previews',()=>{
+  for(const token of ['Campaign and player access','Invitation and player portal join','Character profile save','Player choices and DM override','AI DM and human narration control','Physical dice resolution','Checkpoint and day progression','Combat, damage, turns, and HP','Mission and household activity approval','Clues, maps, flames, plans, and rewards','Story ending, items, and spells','Session timer and recap','Live campaign protection'])assert.ok(testLab.includes(token),`missing test scenario ${token}`);
+  for(const token of ['runFeatureTestSuite','testStoryForecast','testSceneArt','narrationAudio','checkOpenAI','NOT CANON'])assert.ok(testLabPage.includes(token),`missing Test Lab control ${token}`);
+  assert.ok(dmPage.includes('href="/test-lab"'));
+});
+
+test('story and scene-art previews are DM-only and do not persist campaign changes',()=>{
+  const storyStart=api.indexOf("if(body.action==='testStoryForecast')");
+  const artStart=api.indexOf("if(body.action==='testSceneArt')");
+  const sceneEnd=api.indexOf("if(body.action==='generateSceneArt')",artStart);
+  assert.ok(storyStart>=0&&artStart>storyStart&&sceneEnd>artStart);
+  const previewHandlers=api.slice(storyStart,sceneEnd);
+  assert.match(previewHandlers,/if\(!dm\)return deny\(\)/);
+  assert.doesNotMatch(previewHandlers,/saveState\(|addLog\(/);
+  assert.match(previewHandlers,/SIMULATION ONLY — NOT CANON/);
 });
